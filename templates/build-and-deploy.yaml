@@ -1,0 +1,16 @@
+name: build-and-deploy
+steps:
+  - name: Saying hello
+    command: echo "Hello, world!"
+
+  - name: Showing the value of var1
+    command: echo "Showing the value of var1; {{.var1}}"
+
+  - name: Showing the value of var2
+    command: echo "Showing the value of var2; {{.var2}}"
+
+  - name: Cloning the repository
+    command: git clone https://github.com/mind-developer/tricoview-web.git
+
+  - name: Done
+    command: echo "Done!"
