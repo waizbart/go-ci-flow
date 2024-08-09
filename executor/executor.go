@@ -2,6 +2,7 @@ package executor
 
 import (
 	"bytes"
+	"gociflow/logger"
 	"html/template"
 	"io"
 	"os"
@@ -50,19 +51,49 @@ func ExecuteWorkflow(templateName string, variables map[string]string, logWriter
     // Executar cada etapa do workflow
     for _, step := range parsedWorkflow.Steps {
         logWriter.Write([]byte("Executando: " + step.Name + "\n"))
-        
+
         // Executar o comando e capturar os logs
         var cmd *exec.Cmd
         if runtime.GOOS == "windows" {
             cmd = exec.Command("cmd.exe", "/c", step.Command)
         } else {
             cmd = exec.Command("sh", "-c", step.Command)
-        }
-        cmd.Stdout = logWriter
-        cmd.Stderr = logWriter
-
-        err = cmd.Run()
+        }                   
+        
+        // Criar um pipe para capturar a saída do comando
+        stdout, err := cmd.StdoutPipe()
         if err != nil {
+            return err
+        }
+        
+        stderr, err := cmd.StderrPipe()
+        if err != nil {
+            return err
+        }
+
+        if err := cmd.Start(); err != nil {
+            return err
+        }
+
+        // Criar um canal para enviar logs em tempo real
+        logsChan := make(chan string)
+
+        // Goroutine para ler a saída padrão
+        go func() {
+            logger.StreamOutput(stdout, logsChan)
+        }()
+        
+        // Goroutine para ler a saída de erro
+        go func() {
+            logger.StreamOutput(stderr, logsChan)
+        }()
+
+        // Ler logs do canal e enviar para o logWriter
+        for logLine := range logsChan {
+            logWriter.Write([]byte(logLine))
+        }
+
+        if err := cmd.Wait(); err != nil {
             logWriter.Write([]byte("Erro na etapa: " + step.Name + "\n"))
             return err
         }
