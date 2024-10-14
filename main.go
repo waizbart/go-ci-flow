@@ -7,7 +7,6 @@ import (
 )
 
 func main() {
-    // Criação do servidor HTTP
     router := api.NewRouter()
 
     log.Println("Iniciando o servidor na porta 8080...")

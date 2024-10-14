@@ -2,24 +2,20 @@ package api
 
 import (
 	"encoding/json"
-	"fmt"
 	"gociflow/executor"
 	"net/http"
 )
 
-// Estrutura para receber variáveis
 type WorkflowRequest struct {
     TemplateName string            `json:"template_name"`
     Variables    map[string]string `json:"variables"`
 }
 
-// Handler para listar templates de workflows
 func GetWorkflowsHandler(w http.ResponseWriter, r *http.Request) {
-    workflows := []string{"build-and-deploy", "run-tests"} // Exemplos de templates
+    workflows := []string{"build-and-deploy", "run-tests"} 
     json.NewEncoder(w).Encode(workflows)
 }
 
-// Handler para executar um workflow
 func ExecuteWorkflowHandler(w http.ResponseWriter, r *http.Request) {
     var request WorkflowRequest
     if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
@@ -27,11 +23,30 @@ func ExecuteWorkflowHandler(w http.ResponseWriter, r *http.Request) {
         return
     }
 
-    // Executar o workflow usando o executor
-    err := executor.ExecuteWorkflow(request.TemplateName, request.Variables, w)
-    if err != nil {
-        http.Error(w, "Erro ao executar o workflow", http.StatusInternalServerError)
-		fmt.Println("Erro ao executar o workflow:", err)
+    w.Header().Set("Content-Type", "text/event-stream")
+    w.Header().Set("Cache-Control", "no-cache")
+    w.Header().Set("Connection", "keep-alive")
+
+    flusher, ok := w.(http.Flusher)
+    if !ok {
+        http.Error(w, "Streaming não suportado", http.StatusInternalServerError)
         return
+    }
+
+    logsChan := make(chan string)
+
+    go func() {
+        if err := executor.ExecuteWorkflow(request.TemplateName, request.Variables, logsChan); err != nil {
+            logsChan <- "Erro ao executar o workflow: " + err.Error()
+        }
+        close(logsChan) 
+    }()
+
+    for logLine := range logsChan {
+        _, err := w.Write([]byte("data: " + logLine + "\n\n"))
+        if err != nil {
+            break
+        }
+        flusher.Flush()
     }
 }

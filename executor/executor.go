@@ -1,14 +1,12 @@
 package executor
 
 import (
-	"bytes"
-	"html/template"
-	"io"
-	"os"
-	"os/exec"
-	"runtime"
-
-	"gopkg.in/yaml.v2"
+    "bytes"
+    "html/template"
+    "os"
+    "os/exec"
+    "gociflow/logger"
+    "gopkg.in/yaml.v2"
 )
 
 type Step struct {
@@ -17,19 +15,18 @@ type Step struct {
 }
 
 type Workflow struct {
-    Name  string `yaml:"name"`
-    Steps []Step `yaml:"steps"`
+    Name       string `yaml:"name"`
+    WorkingDir string `yaml:"working_dir"`
+    Steps      []Step `yaml:"steps"`
 }
 
-func ExecuteWorkflow(templateName string, variables map[string]string, logWriter io.Writer) error {
-    // Carregar o template do arquivo
-    workflow, err := loadTemplate(templateName)
+func ExecuteWorkflow(templateName string, variables map[string]string, logsChan chan<- string) error {
+    workflowContent, err := loadTemplate(templateName)
     if err != nil {
         return err
     }
 
-    // Substituir variáveis no template
-    tmpl, err := template.New("workflow").Parse(workflow)
+    tmpl, err := template.New("workflow").Parse(workflowContent)
     if err != nil {
         return err
     }
@@ -40,35 +37,62 @@ func ExecuteWorkflow(templateName string, variables map[string]string, logWriter
         return err
     }
 
-    // Converter o resultado para um objeto Workflow
-    var parsedWorkflow Workflow
-    err = yaml.Unmarshal(buffer.Bytes(), &parsedWorkflow)
+    var workflow Workflow
+    err = yaml.Unmarshal(buffer.Bytes(), &workflow)
     if err != nil {
         return err
     }
 
-    // Executar cada etapa do workflow
-    for _, step := range parsedWorkflow.Steps {
-        logWriter.Write([]byte("Executando: " + step.Name + "\n"))
-        
-        // Executar o comando e capturar os logs
-        var cmd *exec.Cmd
-        if runtime.GOOS == "windows" {
-            cmd = exec.Command("cmd.exe", "/c", step.Command)
-        } else {
-            cmd = exec.Command("sh", "-c", step.Command)
+    workingDir := workflow.WorkingDir
+    if _, err := os.Stat(workingDir); os.IsNotExist(err) {
+        if err := os.MkdirAll(workingDir, os.ModePerm); err != nil {
+            return err
         }
-        cmd.Stdout = logWriter
-        cmd.Stderr = logWriter
+    }
 
-        err = cmd.Run()
+    for _, step := range workflow.Steps {
+        logsChan <- "Executando: " + step.Name + "\n"
+
+        cmdTemplate, err := template.New("command").Parse(step.Command)
         if err != nil {
-            logWriter.Write([]byte("Erro na etapa: " + step.Name + "\n"))
+            return err
+        }
+        var cmdBuffer bytes.Buffer
+        err = cmdTemplate.Execute(&cmdBuffer, variables)
+        if err != nil {
+            return err
+        }
+        commandStr := cmdBuffer.String()
+
+        cmd := exec.Command("sh", "-c", commandStr)
+        cmd.Dir = workingDir 
+
+        stdoutPipe, err := cmd.StdoutPipe()
+        if err != nil {
             return err
         }
 
-        logWriter.Write([]byte("Concluído: " + step.Name + "\n"))
+        stderrPipe, err := cmd.StderrPipe()
+        if err != nil {
+            return err
+        }
+
+        if err := cmd.Start(); err != nil {
+            return err
+        }
+
+        go logger.StreamOutput(stdoutPipe, logsChan)
+        go logger.StreamOutput(stderrPipe, logsChan)
+
+        if err := cmd.Wait(); err != nil {
+            logsChan <- "Erro na etapa: " + step.Name + "\n"
+            return err
+        }
+
+        logsChan <- "Concluído: " + step.Name + "\n"
     }
+
+    logsChan <- "Workflow concluído com sucesso\n"
 
     return nil
 }

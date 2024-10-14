@@ -1,22 +1,13 @@
 package logger
 
 import (
+    "bufio"
     "io"
-    "log"
 )
 
-type RealTimeLogger struct {
-    writer io.Writer
-}
-
-func NewRealTimeLogger(w io.Writer) *RealTimeLogger {
-    return &RealTimeLogger{writer: w}
-}
-
-func (l *RealTimeLogger) Write(p []byte) (n int, err error) {
-    n, err = l.writer.Write(p)
-    if err != nil {
-        log.Printf("Erro ao escrever log: %v", err)
+func StreamOutput(reader io.ReadCloser, logsChan chan<- string) {
+    scanner := bufio.NewScanner(reader)
+    for scanner.Scan() {
+        logsChan <- scanner.Text() + "\n"
     }
-    return n, err
 }

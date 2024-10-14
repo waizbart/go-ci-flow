@@ -1,0 +1,20 @@
+name: update-docker-dev
+working_dir: /home/waizbart/Documents/mind/dev
+steps:
+  - name: Atualizando o repositório com git pull
+    command: cd {{.REPO_NAME}} && git pull https://{{.GIT_TOKEN}}@github.com/mind-developer/{{.REPO_NAME}}.git {{.REPO_NAME}}
+
+  - name: Parando o container Docker
+    command: docker stop {{.REPO_NAME}}
+
+  - name: Removendo o container Docker
+    command: docker remove {{.REPO_NAME}}
+
+  - name: Removendo a imagem Docker anterior
+    command: docker rmi {{.REPO_NAME}}:{{.APP_PORT}}
+
+  - name: Construindo a nova imagem Docker
+    command: cd {{.REPO_NAME}} && docker build --network host -t {{.REPO_NAME}}:{{.APP_PORT}} .
+
+  - name: Rodando o novo container Docker
+    command: docker run --network host --restart unless-stopped -d -p {{.APP_PORT}}:{{.APP_PORT}} --name {{.REPO_NAME}} {{.REPO_NAME}}:{{.APP_PORT}}
